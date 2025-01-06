@@ -139,8 +139,8 @@ def extract_participants_from_page(page, participants):
 
 def clean_text(md_text, qa_text):
     # Define the patterns
-    pattern1 = r"Copyright © \d{4} S&P Global Market Intelligence, a division of S&P Global Inc\. All Rights reserved\.\nspglobal\.com/marketintelligence \d+\n.*\n"
-    pattern2 = r"Copyright © \d{4} S&P Global Market Intelligence, a division of S&P Global Inc\. All Rights reserved\.\nspglobal\.com/marketintelligence \d+$"
+    pattern1 = r"Copyright Â© \d{4} S&P Global Market Intelligence, a division of S&P Global Inc\. All Rights reserved\.\nspglobal\.com/marketintelligence \d+\n.*\n"
+    pattern2 = r"Copyright Â© \d{4} S&P Global Market Intelligence, a division of S&P Global Inc\. All Rights reserved\.\nspglobal\.com/marketintelligence \d+$"
     pattern3 = r".*EARNINGS CALL.*\d{4}\n"
     pattern4 = r"Presentation\n"
     pattern5 = r"Question and Answer\n"
@@ -255,24 +255,32 @@ def detect_qa_interactions(qa_text, participants):
     current_interaction = 0
     lines = qa_text.split('\n')
     current_speakers = set()
-    
+    current_analyst = None
+    executive_analyst_pairs = {}
+
     for line in lines:
         line = line.strip().lower()
         if not line:
             continue
-            
-        # Detect new interaction when operator speaks
+
         if 'operator' in line:
             current_interaction += 1
             current_speakers.clear()
-            
-        # Track speakers in current interaction
+            current_analyst = None
+
         for speaker, _ in participants['EXECUTIVES'] + participants['ANALYSTS']:
             if line.startswith(speaker.lower()):
+                if speaker in [name for name, _ in participants['ANALYSTS']]:
+                    current_analyst = speaker
+                elif speaker in [name for name, _ in participants['EXECUTIVES']]:
+                    if current_analyst:
+                        pair = (speaker, current_analyst)
+                        if pair not in executive_analyst_pairs:
+                            executive_analyst_pairs[pair] = current_interaction
                 interaction_count[speaker] = current_interaction
                 current_speakers.add(speaker)
-    
-    return interaction_count
+
+    return interaction_count, executive_analyst_pairs
 
 def extract_file_metadata(filename):
     # Remove 'processed_' if present
@@ -296,76 +304,60 @@ def save_sentiment_analysis(md_sentiment, qa_sentiment, participants, output_fol
     os.makedirs(output_folder, exist_ok=True)
     output_file = os.path.join(output_folder, "speaker_sentiment_analysis.csv")
     
-    # Get metadata from filename
     company_name, quarter, year = extract_file_metadata(filename)
+    interaction_counts, executive_analyst_pairs = detect_qa_interactions(qa_text, participants)
     
-    # Get interaction counts
-    interaction_counts = detect_qa_interactions(qa_text, participants)
-    
-    # Create a dictionary to store roles
     roles = {}
     for name, _ in participants['EXECUTIVES']:
         roles[name] = 'Executive'
     for name, _ in participants['ANALYSTS']:
         roles[name] = 'Analyst'
     
+    titles = {}
+    for category in participants:
+        for name, title in participants[category]:
+            titles[name] = title
+    
     with open(output_file, mode='w', newline='', encoding='utf-8') as file:
         writer = csv.writer(file)
         writer.writerow([
-            "Company", "Quarter", "Year", "Speaker", "Role", "Title", "Section", 
-            "Word Count", "Positive", "Negative", "Uncertainty", "Litigious", 
-            "Strong Modal", "Weak Modal", "Constraining", "Interaction"
+            "Company", "Quarter", "Year", "Speaker", "Role", "Title", "Section", "Word Count",
+            "Positive", "Negative", "Uncertainty", "Litigious", "Strong Modal", "Weak Modal",
+            "Constraining", "Interaction", "Analyst"
         ])
-        
-        # Get titles
-        titles = {}
-        for category in participants:
-            for name, title in participants[category]:
-                titles[name] = title
         
         # Write MD section data - exclude analysts
         for speaker, data in md_sentiment.items():
-            if roles.get(speaker) != 'Analyst':  # Only write if not an analyst
+            if roles.get(speaker) != 'Analyst':
                 writer.writerow([
-                    company_name,
-                    quarter,
-                    year,
-                    speaker,
-                    roles.get(speaker, ""),
-                    titles.get(speaker, ""),
-                    "Presentation",
-                    data["word_count"],
-                    data["positive"],
-                    data["negative"],
-                    data["uncertainty"],
-                    data["litigious"],
-                    data["strong_modal"],
-                    data["weak_modal"],
-                    data["constraining"],
-                    0  # No interactions in presentation
+                    company_name, quarter, year, speaker, roles.get(speaker, ""),
+                    titles.get(speaker, ""), "Presentation", data["word_count"],
+                    data["positive"], data["negative"], data["uncertainty"], data["litigious"],
+                    data["strong_modal"], data["weak_modal"], data["constraining"],
+                    0, ""  # No interactions or analysts in presentation
                 ])
-            
-        # Write QA section data - include all participants
+        
+        # Write QA section data
         for speaker, data in qa_sentiment.items():
-            writer.writerow([
-                company_name,
-                quarter,
-                year,
-                speaker,
-                roles.get(speaker, ""),
-                titles.get(speaker, ""),
-                "Q&A",
-                data["word_count"],
-                data["positive"],
-                data["negative"],
-                data["uncertainty"],
-                data["litigious"],
-                data["strong_modal"],
-                data["weak_modal"],
-                data["constraining"],
-                interaction_counts.get(speaker, 0)
-            ])
-    
+            if roles.get(speaker) == 'Analyst':
+                writer.writerow([
+                    company_name, quarter, year, speaker, roles.get(speaker, ""),
+                    titles.get(speaker, ""), "Q&A", data["word_count"],
+                    data["positive"], data["negative"], data["uncertainty"], data["litigious"],
+                    data["strong_modal"], data["weak_modal"], data["constraining"],
+                    interaction_counts.get(speaker, 0), ""
+                ])
+            else:  # Executive
+                for (exec_name, analyst_name), interaction in executive_analyst_pairs.items():
+                    if exec_name == speaker:
+                        writer.writerow([
+                            company_name, quarter, year, speaker, roles.get(speaker, ""),
+                            titles.get(speaker, ""), "Q&A", data["word_count"],
+                            data["positive"], data["negative"], data["uncertainty"], data["litigious"],
+                            data["strong_modal"], data["weak_modal"], data["constraining"],
+                            interaction, analyst_name
+                        ])
+
     return output_file
 
 def process_pdf(input_path):
@@ -398,9 +390,9 @@ def process_pdf(input_path):
 
 
 # Example usage
-input_folder = r"C:\Users\Jack\Desktop\Capstone\call"
-output_folder = r"E:\Capstone Analysis"
-lm_dict_path = 'C:/Users/Jack/Desktop/Capstone/Loughran-McDonald_MasterDictionary_1993-2023.csv'
+input_folder = os.path.expanduser("~/Desktop/call")
+output_folder = os.path.expanduser("~/Desktop/results")
+lm_dict_path = os.path.expanduser("~/Desktop/dictionary/Loughran-McDonald_MasterDictionary_1993-2023.csv")
 
 # Process all PDFs in the input folder
 def process_folder(input_folder):
@@ -411,10 +403,8 @@ def process_folder(input_folder):
     for filename in os.listdir(input_folder):
         if filename.lower().endswith('.pdf'):
             input_path = os.path.join(input_folder, filename)
-            
             # Process the PDF and check if it was successful
             success = process_pdf(input_path)
-            
             # If processing failed, move the file to error folder
             if not success:
                 try:
@@ -425,4 +415,5 @@ def process_folder(input_folder):
                     print(f"Failed to move {filename} to error folder: {str(e)}")
 
 # Run the processing
-process_folder(input_folder)
+if __name__ == "__main__":
+    process_folder(input_folder)
