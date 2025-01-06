@@ -206,19 +206,29 @@ def detect_speakers_with_sentiment(text, participants, sentiment_dict):
 
     def analyze_sentiment(text, speaker, analyst=None):
         sentiment = {
-            'positive': 0, 'negative': 0, 'uncertainty': 0, 'litigious': 0,
-            'strong_modal': 0, 'weak_modal': 0, 'constraining': 0,
-            'word_count': 0, 'text': [], 'interaction': current_interaction,
+            'positive': 0,
+            'negative': 0,
+            'uncertainty': 0,
+            'litigious': 0,
+            'strong_modal': 0,
+            'weak_modal': 0,
+            'constraining': 0,
+            'word_count': 0,
+            'text': [],
+            'interaction': current_interaction,
             'analyst': analyst
         }
         
         words = [w for w in text.lower().split() if w]
         sentiment['word_count'] = len(words)
         
-        for word in words:
+        # Use Counter to count occurrences of each word
+        word_counts = Counter(words)
+        
+        for word, count in word_counts.items():
             for sentiment_type, word_set in sentiment_dict.items():
                 if word in word_set:
-                    sentiment[sentiment_type] += 1
+                    sentiment[sentiment_type] += count
         
         return sentiment
 
