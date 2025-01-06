@@ -5,6 +5,8 @@ import pandas as pd
 import re
 from collections import Counter
 import shutil
+import contractions
+
 
 def load_lm_dictionary(file_path): #load loughran mcdonald dictionary
     lm_dict = pd.read_csv(file_path)
@@ -139,15 +141,16 @@ def extract_participants_from_page(page, participants):
 
 def clean_text(md_text, qa_text):
     # Define the patterns
-    pattern1 = r"Copyright Â© \d{4} S&P Global Market Intelligence, a division of S&P Global Inc\. All Rights reserved\.\nspglobal\.com/marketintelligence \d+\n.*\n"
-    pattern2 = r"Copyright Â© \d{4} S&P Global Market Intelligence, a division of S&P Global Inc\. All Rights reserved\.\nspglobal\.com/marketintelligence \d+$"
+    pattern1 = r"Copyright Ã‚Â© \d{4} S&P Global Market Intelligence, a division of S&P Global Inc\. All Rights reserved\.\nspglobal\.com/marketintelligence \d+\n.*\n"
+    pattern2 = r"Copyright Ã‚Â© \d{4} S&P Global Market Intelligence, a division of S&P Global Inc\. All Rights reserved\.\nspglobal\.com/marketintelligence \d+$"
     pattern3 = r".*EARNINGS CALL.*\d{4}\n"
     pattern4 = r"Presentation\n"
     pattern5 = r"Question and Answer\n"
     
     def clean_for_sentiment(text):
+        expanded_text = contractions.fix(text)
         # Remove text within brackets and parentheses along with the brackets/parentheses themselves
-        text = re.sub(r'\[.*?\]', '', text)
+        text = re.sub(r'\[.*?\]', '', expanded_text)
         text = re.sub(r'\(.*?\)', '', text)
         text = re.sub(r'\<.*?\>', '', text)
         # Remove specific characters while preserving line breaks
@@ -155,6 +158,7 @@ def clean_text(md_text, qa_text):
         text = text.replace("'", '')
         text = text.replace('"', '')
         text = text.replace('%', '')
+        text = text.replace('--', ' ')
         text = text.replace('-', ' ')
         text = text.replace('?', '')
         text = text.replace('[', '')
@@ -169,6 +173,7 @@ def clean_text(md_text, qa_text):
         text = text.lower()
         # Clean up multiple newlines but preserve single ones
         text = re.sub(r'\n\s*\n', '\n', text)
+        
         return text.strip()
 
     # Clean md_text
@@ -188,76 +193,89 @@ def clean_text(md_text, qa_text):
     return md_text, qa_text
 
 def detect_speakers_with_sentiment(text, participants, sentiment_dict):
-    # Create dictionaries for participants and sentiment
     all_participants = {}
     speaker_sentiment = {}
-    
-    # Initialize dictionaries first
+    current_interaction = 0
+    current_analyst = None
+    current_executive = None
+
     for category in participants:
         for name, title in participants[category]:
             all_participants[name] = title
-            speaker_sentiment[name] = {
-                'positive': 0,
-                'negative': 0,
-                'uncertainty': 0,
-                'litigious': 0,
-                'strong_modal': 0,
-                'weak_modal': 0,
-                'constraining': 0,
-                'word_count': 0,
-                'text': []
-            }
-    
-    def analyze_sentiment(text, speaker):
-        # Split text into words and remove empty strings
+            speaker_sentiment[name] = []
+
+    def analyze_sentiment(text, speaker, analyst=None):
+        sentiment = {
+            'positive': 0, 'negative': 0, 'uncertainty': 0, 'litigious': 0,
+            'strong_modal': 0, 'weak_modal': 0, 'constraining': 0,
+            'word_count': 0, 'text': [], 'interaction': current_interaction,
+            'analyst': analyst
+        }
+        
         words = [w for w in text.lower().split() if w]
-        # Add to total word count
-        speaker_sentiment[speaker]['word_count'] += len(words)
+        sentiment['word_count'] = len(words)
         
         for word in words:
             for sentiment_type, word_set in sentiment_dict.items():
                 if word in word_set:
-                    speaker_sentiment[speaker][sentiment_type] += 1
-    
-    current_speaker = None
+                    sentiment[sentiment_type] += 1
+        
+        return sentiment
+
     lines = text.split('\n')
+    current_text = ""
     
     for line in lines:
         line = line.strip()
         if not line:
             continue
-            
+        
         speaker_found = False
         for participant_name in all_participants:
-            # Check both direct starts and mentions in operator introductions
             if (line.lower().startswith(participant_name.lower()) or 
                 (line.lower().startswith('operator') and participant_name.lower() in line.lower())):
-                current_speaker = participant_name
-                # If operator is introducing, take the next line as the speaker's text
-                if 'operator' in line.lower():
-                    continue
-                clean_line = line[len(participant_name):].strip()
-                if clean_line:
-                    speaker_sentiment[current_speaker]['text'].append(clean_line)
-                    analyze_sentiment(clean_line, current_speaker)
+                if current_text:
+                    if current_executive:
+                        sentiment = analyze_sentiment(current_text, current_executive, current_analyst)
+                        speaker_sentiment[current_executive].append(sentiment)
+                    elif current_analyst:
+                        sentiment = analyze_sentiment(current_text, current_analyst)
+                        speaker_sentiment[current_analyst].append(sentiment)
+                
+                current_text = ""
+                if participant_name in [name for name, _ in participants['ANALYSTS']]:
+                    current_analyst = participant_name
+                    current_executive = None
+                    current_interaction += 1
+                else:
+                    current_executive = participant_name
+                
                 speaker_found = True
                 break
         
-        # Handle continuation of current speaker's text
-        if not speaker_found and current_speaker and line:
-            speaker_sentiment[current_speaker]['text'].append(line)
-            analyze_sentiment(line, current_speaker)
-    
+        if not speaker_found:
+            current_text += " " + line
+
+    # Process the last interaction
+    if current_text:
+        if current_executive:
+            sentiment = analyze_sentiment(current_text, current_executive, current_analyst)
+            speaker_sentiment[current_executive].append(sentiment)
+        elif current_analyst:
+            sentiment = analyze_sentiment(current_text, current_analyst)
+            speaker_sentiment[current_analyst].append(sentiment)
+
     return speaker_sentiment
 
 def detect_qa_interactions(qa_text, participants):
     interaction_count = {}
     current_interaction = 0
-    lines = qa_text.split('\n')
-    current_speakers = set()
     current_analyst = None
     executive_analyst_pairs = {}
+    current_executive = None
+    word_count = 0
 
+    lines = qa_text.split('\n')
     for line in lines:
         line = line.strip().lower()
         if not line:
@@ -265,20 +283,35 @@ def detect_qa_interactions(qa_text, participants):
 
         if 'operator' in line:
             current_interaction += 1
-            current_speakers.clear()
             current_analyst = None
+            current_executive = None
+            word_count = 0
+            continue
 
+        speaker_found = False
         for speaker, _ in participants['EXECUTIVES'] + participants['ANALYSTS']:
             if line.startswith(speaker.lower()):
                 if speaker in [name for name, _ in participants['ANALYSTS']]:
+                    if current_analyst != speaker:
+                        current_interaction += 1
                     current_analyst = speaker
+                    word_count = 0
                 elif speaker in [name for name, _ in participants['EXECUTIVES']]:
-                    if current_analyst:
-                        pair = (speaker, current_analyst)
-                        if pair not in executive_analyst_pairs:
-                            executive_analyst_pairs[pair] = current_interaction
-                interaction_count[speaker] = current_interaction
-                current_speakers.add(speaker)
+                    current_executive = speaker
+                    word_count = 0
+                speaker_found = True
+                line = line[len(speaker):].strip()
+                break
+
+        if not speaker_found and current_executive and current_analyst:
+            words = line.split()
+            word_count += len(words)
+            pair = (current_executive, current_analyst)
+            if pair not in executive_analyst_pairs:
+                executive_analyst_pairs[pair] = {'interaction': current_interaction, 'word_count': 0}
+            executive_analyst_pairs[pair]['word_count'] += len(words)
+
+        interaction_count[current_executive or current_analyst] = current_interaction
 
     return interaction_count, executive_analyst_pairs
 
@@ -321,42 +354,40 @@ def save_sentiment_analysis(md_sentiment, qa_sentiment, participants, output_fol
     with open(output_file, mode='w', newline='', encoding='utf-8') as file:
         writer = csv.writer(file)
         writer.writerow([
-            "Company", "Quarter", "Year", "Speaker", "Role", "Title", "Section", "Word Count",
-            "Positive", "Negative", "Uncertainty", "Litigious", "Strong Modal", "Weak Modal",
-            "Constraining", "Interaction", "Analyst"
+            "Company", "Quarter", "Year", "Speaker", "Role", "Title", "Section",
+            "Word Count", "Positive", "Negative", "Uncertainty", "Litigious",
+            "Strong Modal", "Weak Modal", "Constraining", "Interaction", "Analyst"
         ])
-        
-        # Write MD section data - exclude analysts
-        for speaker, data in md_sentiment.items():
-            if roles.get(speaker) != 'Analyst':
+
+         # Write MD section data
+        for speaker, data_list in md_sentiment.items():
+            for data in data_list:
                 writer.writerow([
-                    company_name, quarter, year, speaker, roles.get(speaker, ""),
-                    titles.get(speaker, ""), "Presentation", data["word_count"],
-                    data["positive"], data["negative"], data["uncertainty"], data["litigious"],
-                    data["strong_modal"], data["weak_modal"], data["constraining"],
-                    0, ""  # No interactions or analysts in presentation
+                    company_name, quarter, year, speaker, roles.get(speaker, ""), titles.get(speaker, ""),
+                    "Presentation", data["word_count"], data["positive"], data["negative"], data["uncertainty"],
+                    data["litigious"], data["strong_modal"], data["weak_modal"], data["constraining"],
+                    0, ""
                 ])
-        
+
         # Write QA section data
-        for speaker, data in qa_sentiment.items():
-            if roles.get(speaker) == 'Analyst':
-                writer.writerow([
-                    company_name, quarter, year, speaker, roles.get(speaker, ""),
-                    titles.get(speaker, ""), "Q&A", data["word_count"],
-                    data["positive"], data["negative"], data["uncertainty"], data["litigious"],
-                    data["strong_modal"], data["weak_modal"], data["constraining"],
-                    interaction_counts.get(speaker, 0), ""
-                ])
-            else:  # Executive
-                for (exec_name, analyst_name), interaction in executive_analyst_pairs.items():
-                    if exec_name == speaker:
-                        writer.writerow([
-                            company_name, quarter, year, speaker, roles.get(speaker, ""),
-                            titles.get(speaker, ""), "Q&A", data["word_count"],
-                            data["positive"], data["negative"], data["uncertainty"], data["litigious"],
-                            data["strong_modal"], data["weak_modal"], data["constraining"],
-                            interaction, analyst_name
-                        ])
+        for speaker, data_list in qa_sentiment.items():
+            for data in data_list:
+                if roles.get(speaker) == 'Analyst':
+                    writer.writerow([
+                        company_name, quarter, year, speaker, roles.get(speaker, ""), titles.get(speaker, ""),
+                        "Q&A", data["word_count"], data["positive"], data["negative"], data["uncertainty"],
+                        data["litigious"], data["strong_modal"], data["weak_modal"], data["constraining"],
+                        interaction_counts[speaker], ""
+                    ])
+                else:  # Executive
+                    analyst = next((name for name, _ in participants['ANALYSTS'] if name in qa_text.split('\n')[data['interaction']]), "")
+                    interaction = executive_analyst_pairs.get((speaker, analyst), {}).get('interaction', data['interaction'])
+                    writer.writerow([
+                        company_name, quarter, year, speaker, roles.get(speaker, ""), titles.get(speaker, ""),
+                        "Q&A", data["word_count"], data["positive"], data["negative"], data["uncertainty"],
+                        data["litigious"], data["strong_modal"], data["weak_modal"], data["constraining"],
+                        interaction, analyst
+                    ])
 
     return output_file
 
