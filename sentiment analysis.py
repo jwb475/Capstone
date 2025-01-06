@@ -421,9 +421,9 @@ def process_pdf(input_path):
 
 
 # Example usage
-input_folder = os.path.expanduser("~/Desktop/call")
-output_folder = os.path.expanduser("~/Desktop/results")
-lm_dict_path = os.path.expanduser("~/Desktop/dictionary/Loughran-McDonald_MasterDictionary_1993-2023.csv")
+input_folder = r"C:\Users\Jack\Desktop\Capstone\call"
+output_folder = r"E:\Capstone Analysis"
+lm_dict_path = r'C:\Users\Jack\Desktop\Capstone\Loughran-McDonald_MasterDictionary_1993-2023.csv'
 
 # Process all PDFs in the input folder
 def process_folder(input_folder):
