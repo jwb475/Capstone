@@ -325,22 +325,28 @@ def detect_qa_interactions(qa_text, participants):
     
     return interaction_count, executive_analyst_pairs
 
+
 def extract_file_metadata(filename):
     # Remove 'processed_' if present
     clean_name = filename.replace('processed_', '')
-    
-    # Extract company name (everything before first comma)
-    company_name = clean_name.split(',')[0].strip()
-    
-    # Extract quarter and year using regex
-    quarter_match = re.search(r'Q(\d)\s+(\d{4})', clean_name)
-    if quarter_match:
-        quarter = quarter_match.group(1)
-        year = quarter_match.group(2)
+
+    # Check if the filename is in the format 'processed_companyname_year'
+    if re.match(r'^[^,]+_\d{4}$', clean_name):
+        company_name, year = clean_name.rsplit('_', 1)
+        quarter = '4'  # Assume quarter 4
     else:
-        quarter = ""
-        year = ""
-        
+        # Extract company name (everything before first comma)
+        company_name = clean_name.split(',')[0].strip()
+
+        # Extract quarter and year using regex
+        quarter_match = re.search(r'Q(\d)\s+(\d{4})', clean_name)
+        if quarter_match:
+            quarter = quarter_match.group(1)
+            year = quarter_match.group(2)
+        else:
+            quarter = ""
+            year = ""
+
     return company_name, quarter, year
 
 def save_sentiment_analysis(md_sentiment, qa_sentiment, participants, output_folder, filename, qa_text, output_file):
@@ -404,9 +410,12 @@ def process_pdf(input_path, output_file):
         return False
 
 # Example usage
-input_folder = r"E:\Documents\2024 Fall\Transcripts\Processed 1"
-output_folder = r"E:\Capstone Analysis"
-lm_dict_path = r'C:\Users\Jack\Desktop\Capstone\Loughran-McDonald_MasterDictionary_1993-2023.csv'
+desktop_path = os.path.expanduser("~/Desktop")
+input_folder = os.path.join(desktop_path, "call")
+output_folder = os.path.join(desktop_path, "results")
+lm_dict_path = os.path.join(desktop_path, "dictionary", "Loughran-McDonald_MasterDictionary_1993-2023.csv")
+# Create output folder if it doesn't exist
+os.makedirs(output_folder, exist_ok=True)
 
 def process_folder(input_folder):
     error_folder = os.path.join(output_folder, "error_pdfs")
