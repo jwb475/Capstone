@@ -404,7 +404,7 @@ def process_pdf(input_path, output_file):
         return False
 
 # Example usage
-input_folder = r"C:\Users\Jack\Desktop\Capstone\call"
+input_folder = r"E:\Documents\2024 Fall\Transcripts\Processed 1"
 output_folder = r"E:\Capstone Analysis"
 lm_dict_path = r'C:\Users\Jack\Desktop\Capstone\Loughran-McDonald_MasterDictionary_1993-2023.csv'
 
