@@ -9,5 +9,5 @@ This project is a NYU Abu Dhabi Economics Capstone Project meant to elaborate th
 
 # Key Contributions
 
-Enhanced Interaction Terms: The introduction of tagged interaction terms provides a new dimension for analyzing sentiment in earnings calls, which has not been extensively explored in previous literature.
-Insights into Gender Dynamics: This research contributes to understanding how gender affects communication styles in corporate settings, particularly during high-stakes interactions like earnings calls.
+- Enhanced Interaction Terms: The introduction of tagged interaction terms provides a new dimension for analyzing sentiment in earnings calls, which has not been extensively explored in previous literature.
+- Insights into Gender Dynamics: This research contributes to understanding how gender affects communication styles in corporate settings, particularly during high-stakes interactions like earnings calls.
