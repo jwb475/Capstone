@@ -1,4 +1,4 @@
-# Capstone
+# Evolving Dialogue: The Role of Gender in Analyst Interactions in Earnings Conference Calls
 This project is a NYU Abu Dhabi Economics Capstone Project meant to elaborate the work of the paper, "Sentiment Analysis and Gender Differences in Earning Calls." The primary focus of the project is to enhance the understanding of interactions during the question and answer (Q&A) sessions of earnings calls by tagging speaker interactions. This enables the creation of interaction terms that can be further analyzed to explore how these dynamics affect sentiment and market reactions. 
 
 # Methodology 
